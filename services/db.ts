@@ -15,18 +15,9 @@ const INITIAL_DATA: AppState = {
   ],
   sessions: [
     { id: 'SESS001', courseCode: 'SEC101', startDate: '2024-05-01', endDate: '2024-05-01', location: 'Online', trainer: 'Alice Vance', organizer: 'IT Security Dept' },
-    { id: 'SESS002', courseCode: 'REACT202', startDate: '2024-06-10', endDate: '2024-06-12', location: 'Room A', trainer: 'Bob Martin', organizer: 'L&D Team' },
-    { id: 'SESS003', courseCode: 'SAFE505', startDate: '2024-07-20', endDate: '2024-07-20', location: 'Assembly Point', trainer: 'Safety Officer', organizer: 'HR' },
   ],
-  registrations: [
-    { id: 'REG001', employeeId: 'EMP001', sessionId: 'SESS001', status: AttendanceStatus.ATTENDED },
-    { id: 'REG002', employeeId: 'EMP002', sessionId: 'SESS001', status: AttendanceStatus.REGISTERED },
-    { id: 'REG003', employeeId: 'EMP001', sessionId: 'SESS003', status: AttendanceStatus.ATTENDED },
-  ],
-  attendance: [
-    { id: 'ATT001', registrationId: 'REG001', date: '2024-05-01', hours: 4 },
-    { id: 'ATT002', registrationId: 'REG003', date: '2024-07-20', hours: 8 },
-  ]
+  registrations: [],
+  attendance: []
 };
 
 export class Database {
@@ -45,20 +36,22 @@ export class Database {
     return this.state;
   }
 
-  static addEmployee(emp: Employee) {
-    if (this.state.employees.find(e => e.id === emp.id)) return;
+  static addEmployee(emp: Employee): boolean {
+    if (this.state.employees.find(e => e.id === emp.id)) return false;
     this.state.employees.push(emp);
     this.save();
+    return true;
   }
 
-  static addCourse(course: Course) {
-    const existing = this.state.courses.findIndex(c => c.code === course.code);
-    if (existing !== -1) {
-      this.state.courses[existing] = course;
+  static addCourse(course: Course): boolean {
+    const existingIndex = this.state.courses.findIndex(c => c.code === course.code);
+    if (existingIndex !== -1) {
+      this.state.courses[existingIndex] = course;
     } else {
       this.state.courses.push(course);
     }
     this.save();
+    return true;
   }
 
   static addSession(session: TrainingSession) {
@@ -66,9 +59,12 @@ export class Database {
     this.save();
   }
 
-  static registerEmployee(reg: Registration) {
+  static registerEmployee(reg: Registration): boolean {
+    const exists = this.state.registrations.find(r => r.employeeId === reg.employeeId && r.sessionId === reg.sessionId);
+    if (exists) return false;
     this.state.registrations.push(reg);
     this.save();
+    return true;
   }
 
   static recordAttendance(att: AttendanceRecord) {
