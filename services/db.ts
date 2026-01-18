@@ -27,15 +27,19 @@ export class Database {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (!saved) return INITIAL_DATA;
     
-    const parsed = JSON.parse(saved);
-    // Migration: ensure isActive exists
-    if (parsed.employees) {
-      parsed.employees = parsed.employees.map((e: any) => ({
-        ...e,
-        isActive: e.isActive !== undefined ? e.isActive : true
-      }));
+    try {
+      const parsed = JSON.parse(saved);
+      if (parsed.employees) {
+        parsed.employees = parsed.employees.map((e: any) => ({
+          ...e,
+          isActive: e.isActive !== undefined ? e.isActive : true
+        }));
+      }
+      return parsed;
+    } catch (e) {
+      console.error("Failed to load DB", e);
+      return INITIAL_DATA;
     }
-    return parsed;
   }
 
   static save() {
@@ -47,6 +51,19 @@ export class Database {
     return this.state;
   }
 
+  // --- Backup & Restore ---
+  static exportData() {
+    const data = JSON.stringify(this.state, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `mlt_lms_backup_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // --- Employee Management ---
   static addEmployee(emp: Partial<Employee> & { id: string }): boolean {
     const id = String(emp.id).trim();
     const existingIndex = this.state.employees.findIndex(e => String(e.id).trim().toLowerCase() === id.toLowerCase());
@@ -70,7 +87,8 @@ export class Database {
   }
 
   static toggleEmployeeStatus(id: string) {
-    const emp = this.state.employees.find(e => e.id === id);
+    const targetId = String(id).trim().toLowerCase();
+    const emp = this.state.employees.find(e => String(e.id).trim().toLowerCase() === targetId);
     if (emp) {
       emp.isActive = !emp.isActive;
       this.save();
@@ -78,14 +96,32 @@ export class Database {
   }
 
   static deleteEmployee(id: string) {
-    this.state.employees = this.state.employees.filter(e => e.id !== id);
-    // Cleanup registrations and attendance associated with deleted employee
-    const regsToRemove = this.state.registrations.filter(r => r.employeeId === id).map(r => r.id);
-    this.state.registrations = this.state.registrations.filter(r => r.employeeId !== id);
-    this.state.attendance = this.state.attendance.filter(a => !regsToRemove.includes(a.registrationId));
+    const targetId = String(id).trim().toLowerCase();
+    
+    // 1. กรองพนักงานออก
+    this.state.employees = this.state.employees.filter(e => 
+      String(e.id).trim().toLowerCase() !== targetId
+    );
+    
+    // 2. หาการลงทะเบียนของพนักงานคนนี้
+    const regsToRemove = this.state.registrations
+      .filter(r => String(r.employeeId).trim().toLowerCase() === targetId)
+      .map(r => r.id);
+    
+    // 3. ลบการลงทะเบียน
+    this.state.registrations = this.state.registrations.filter(r => 
+      String(r.employeeId).trim().toLowerCase() !== targetId
+    );
+    
+    // 4. ลบประวัติการเข้าเรียน
+    this.state.attendance = this.state.attendance.filter(a => 
+      !regsToRemove.includes(a.registrationId)
+    );
+    
     this.save();
   }
 
+  // --- Methods อื่นๆ คงเดิมแต่ปรับปรุงการ save ให้แม่นยำ ---
   static addCourse(course: Course): boolean {
     const code = String(course.code).trim();
     const existingIndex = this.state.courses.findIndex(c => String(c.code).trim().toLowerCase() === code.toLowerCase());
@@ -119,78 +155,36 @@ export class Database {
     this.state.attendance.push(att);
     const reg = this.state.registrations.find(r => r.id === att.registrationId);
     if (reg) {
-      this.updateRegistrationStatus(reg.id);
-    }
-    this.save();
-  }
-
-  private static updateRegistrationStatus(regId: string) {
-    const reg = this.state.registrations.find(r => r.id === regId);
-    if (!reg) return;
-
-    const session = this.state.sessions.find(s => s.id === reg.sessionId);
-    const course = this.state.courses.find(c => String(c.code).trim().toLowerCase() === String(session?.courseCode).trim().toLowerCase());
-    
-    const totalAttended = this.state.attendance
-      .filter(a => a.registrationId === reg.id)
-      .reduce((sum, a) => sum + a.hours, 0);
-    
-    if (course) {
-      if (totalAttended >= course.totalHours) {
-        reg.status = AttendanceStatus.ATTENDED;
-      } else if (totalAttended > 0) {
-        reg.status = AttendanceStatus.PARTIALLY_ATTENDED;
+      const session = this.state.sessions.find(s => s.id === reg.sessionId);
+      const course = this.state.courses.find(c => String(c.code).trim().toLowerCase() === String(session?.courseCode).trim().toLowerCase());
+      const totalAttended = this.state.attendance.filter(a => a.registrationId === reg.id).reduce((sum, a) => sum + a.hours, 0);
+      if (course) {
+        if (totalAttended >= course.totalHours) reg.status = AttendanceStatus.ATTENDED;
+        else if (totalAttended > 0) reg.status = AttendanceStatus.PARTIALLY_ATTENDED;
       }
     }
+    this.save();
   }
 
   static addManualHistory(data: { employeeId: string, courseCode: string, date: string, hours: number, trainer?: string }) {
     const empId = String(data.employeeId).trim();
     const cCode = String(data.courseCode).trim();
-
-    let session = this.state.sessions.find(s => 
-      String(s.courseCode).trim().toLowerCase() === cCode.toLowerCase() && 
-      s.startDate === data.date && 
-      s.location === 'Manual Entry'
-    );
-
+    let session = this.state.sessions.find(s => String(s.courseCode).trim().toLowerCase() === cCode.toLowerCase() && s.startDate === data.date && s.location === 'Manual Entry');
     if (!session) {
-      session = {
-        id: `SESS_H_${Math.random().toString(36).substr(2, 6)}`,
-        courseCode: cCode,
-        startDate: data.date,
-        endDate: data.date,
-        location: 'Manual Entry',
-        trainer: data.trainer || 'External',
-        organizer: 'Self/Manual'
-      };
+      session = { id: `SESS_H_${Math.random().toString(36).substr(2, 6)}`, courseCode: cCode, startDate: data.date, endDate: data.date, location: 'Manual Entry', trainer: data.trainer || 'External', organizer: 'Self/Manual' };
       this.state.sessions.push(session);
     }
-
-    let reg = this.state.registrations.find(r => 
-      String(r.employeeId).trim().toLowerCase() === empId.toLowerCase() && 
-      r.sessionId === session!.id
-    );
-
+    let reg = this.state.registrations.find(r => String(r.employeeId).trim().toLowerCase() === empId.toLowerCase() && r.sessionId === session!.id);
     if (!reg) {
-      reg = {
-        id: `REG_H_${Math.random().toString(36).substr(2, 6)}`,
-        employeeId: empId,
-        sessionId: session!.id,
-        status: AttendanceStatus.REGISTERED
-      };
+      reg = { id: `REG_H_${Math.random().toString(36).substr(2, 6)}`, employeeId: empId, sessionId: session!.id, status: AttendanceStatus.REGISTERED };
       this.state.registrations.push(reg);
     }
-
-    const att: AttendanceRecord = {
-      id: `ATT_H_${Math.random().toString(36).substr(2, 6)}`,
-      registrationId: reg.id,
-      date: data.date,
-      hours: data.hours
-    };
+    const att: AttendanceRecord = { id: `ATT_H_${Math.random().toString(36).substr(2, 6)}`, registrationId: reg.id, date: data.date, hours: data.hours };
     this.state.attendance.push(att);
-
-    this.updateRegistrationStatus(reg.id);
+    const course = this.state.courses.find(c => String(c.code).trim().toLowerCase() === cCode.toLowerCase());
+    const totalAttended = this.state.attendance.filter(a => a.registrationId === reg!.id).reduce((sum, a) => sum + a.hours, 0);
+    if (course && totalAttended >= course.totalHours) reg.status = AttendanceStatus.ATTENDED;
+    else if (course && totalAttended > 0) reg.status = AttendanceStatus.PARTIALLY_ATTENDED;
     this.save();
   }
 }
