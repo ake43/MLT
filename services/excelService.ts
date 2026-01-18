@@ -4,21 +4,39 @@ import { Database } from './db';
 import { Employee, Course, AttendanceStatus } from '../types';
 
 export class ExcelService {
+  private static normalizeRow(row: any): any {
+    const normalized: any = {};
+    Object.keys(row).forEach(key => {
+      const normalizedKey = key.trim().toLowerCase().replace(/\s+/g, '_');
+      normalized[normalizedKey] = row[key];
+    });
+    return normalized;
+  }
+
   static async importEmployees(file: File): Promise<string[]> {
     const data = await this.readExcel(file);
     const errors: string[] = [];
-    data.forEach((row: any, index: number) => {
-      const { ID, Name_TH, Name_EN, Department, Position } = row;
-      if (!ID || (!Name_TH && !Name_EN)) {
+    
+    data.forEach((rawRow: any, index: number) => {
+      const row = this.normalizeRow(rawRow);
+      // Support various header styles: ID, id, EmployeeID, employee_id
+      const id = row.id || row.employeeid || row.employee_id || row.personnel_id;
+      const nameTh = row.name_th || row.nameth || row.full_name_th;
+      const nameEn = row.name_en || row.nameen || row.full_name_en;
+      const department = row.department || row.dept || row.sector;
+      const position = row.position || row.job_title || row.pos;
+
+      if (!id || (!nameTh && !nameEn)) {
         errors.push(`Row ${index + 2}: Missing ID or Name (TH/EN)`);
         return;
       }
+
       Database.addEmployee({ 
-        id: String(ID), 
-        nameTh: Name_TH || Name_EN || 'N/A', 
-        nameEn: Name_EN || Name_TH || 'N/A', 
-        department: Department || 'N/A', 
-        position: Position || 'N/A' 
+        id: String(id), 
+        nameTh: nameTh || nameEn || 'N/A', 
+        nameEn: nameEn || nameTh || 'N/A', 
+        department: department || 'N/A', 
+        position: position || 'N/A' 
       });
     });
     return errors;
@@ -27,19 +45,28 @@ export class ExcelService {
   static async importCourses(file: File): Promise<string[]> {
     const data = await this.readExcel(file);
     const errors: string[] = [];
-    data.forEach((row: any, index: number) => {
-      const { Code, Name_TH, Name_EN, Category, Hours, Validity } = row;
-      if (!Code || (!Name_TH && !Name_EN) || !Hours) {
+    
+    data.forEach((rawRow: any, index: number) => {
+      const row = this.normalizeRow(rawRow);
+      const code = row.code || row.coursecode || row.course_code;
+      const nameTh = row.name_th || row.nameth;
+      const nameEn = row.name_en || row.nameen;
+      const hours = row.hours || row.total_hours || row.credit;
+      const category = row.category || row.type;
+      const validity = row.validity || row.validity_months || row.expire;
+
+      if (!code || (!nameTh && !nameEn) || !hours) {
         errors.push(`Row ${index + 2}: Missing required fields (Code, Name, or Hours)`);
         return;
       }
+
       Database.addCourse({ 
-        code: String(Code), 
-        nameTh: Name_TH || Name_EN || 'N/A', 
-        nameEn: Name_EN || Name_TH || 'N/A', 
-        category: Category || 'Technical', 
-        totalHours: Number(Hours),
-        validityMonths: Validity ? Number(Validity) : undefined
+        code: String(code), 
+        nameTh: nameTh || nameEn || 'N/A', 
+        nameEn: nameEn || nameTh || 'N/A', 
+        category: category || 'Technical', 
+        totalHours: Number(hours),
+        validityMonths: validity ? Number(validity) : undefined
       });
     });
     return errors;
@@ -50,53 +77,35 @@ export class ExcelService {
     const errors: string[] = [];
     const db = Database.get();
 
-    data.forEach((row: any, index: number) => {
-      const { EmployeeID, CourseCode, Date, Hours } = row;
-      if (!EmployeeID || !CourseCode || !Date || !Hours) {
+    data.forEach((rawRow: any, index: number) => {
+      const row = this.normalizeRow(rawRow);
+      const employeeId = row.employeeid || row.employee_id || row.id;
+      const courseCode = row.coursecode || row.course_code || row.code;
+      const date = row.date || row.training_date;
+      const hours = row.hours || row.attended_hours || row.credit;
+
+      if (!employeeId || !courseCode || !date || !hours) {
         errors.push(`Row ${index + 2}: Missing required fields (EmployeeID, CourseCode, Date, Hours)`);
         return;
       }
 
-      const emp = db.employees.find(e => e.id === String(EmployeeID));
-      const course = db.courses.find(c => c.code === String(CourseCode));
+      const emp = db.employees.find(e => String(e.id).trim().toLowerCase() === String(employeeId).trim().toLowerCase());
+      const course = db.courses.find(c => String(c.code).trim().toLowerCase() === String(courseCode).trim().toLowerCase());
 
       if (!emp) {
-        errors.push(`Row ${index + 2}: Employee ID ${EmployeeID} not found`);
+        errors.push(`Row ${index + 2}: Employee ID ${employeeId} not found in database`);
         return;
       }
       if (!course) {
-        errors.push(`Row ${index + 2}: Course Code ${CourseCode} not found`);
+        errors.push(`Row ${index + 2}: Course Code ${courseCode} not found in database`);
         return;
       }
 
-      let session = db.sessions.find(s => s.courseCode === course.code && s.startDate === String(Date));
-      if (!session) {
-        session = {
-          id: `HIST_${Math.random().toString(36).substr(2, 9)}`,
-          courseCode: course.code,
-          startDate: String(Date),
-          endDate: String(Date),
-          location: 'Historical Import'
-        };
-        Database.addSession(session);
-      }
-
-      let reg = db.registrations.find(r => r.employeeId === emp.id && r.sessionId === session?.id);
-      if (!reg) {
-        reg = {
-          id: `REG_H_${Math.random().toString(36).substr(2, 9)}`,
-          employeeId: emp.id,
-          sessionId: session.id,
-          status: AttendanceStatus.REGISTERED
-        };
-        Database.registerEmployee(reg);
-      }
-
-      Database.recordAttendance({
-        id: `ATT_H_${Math.random().toString(36).substr(2, 9)}`,
-        registrationId: reg.id,
-        date: String(Date),
-        hours: Number(Hours)
+      Database.addManualHistory({
+        employeeId: String(employeeId),
+        courseCode: String(courseCode),
+        date: String(date),
+        hours: Number(hours)
       });
     });
     return errors;
@@ -124,10 +133,10 @@ export class ExcelService {
     
     if (type === 'employee') {
       data = [{ ID: 'EMP001', Name_TH: 'สมชาย รักดี', Name_EN: 'Somchai Rakdee', Department: 'Engineering', Position: 'Developer' }];
-      filename = 'employee_bilingual_template.xlsx';
+      filename = 'employee_template.xlsx';
     } else if (type === 'course') {
-      data = [{ Code: 'C001', Name_TH: 'อบรมความปลอดภัย', Name_EN: 'Safety Training', Category: 'Safety', Hours: 8, Validity: 12 }];
-      filename = 'course_bilingual_template.xlsx';
+      data = [{ Code: 'C001', Name_TH: 'ความปลอดภัย', Name_EN: 'Safety Training', Category: 'Safety', Hours: 8, Validity: 12 }];
+      filename = 'course_template.xlsx';
     } else if (type === 'history') {
       data = [{ EmployeeID: 'EMP001', CourseCode: 'C001', Date: '2023-01-01', Hours: 4 }];
       filename = 'history_template.xlsx';
