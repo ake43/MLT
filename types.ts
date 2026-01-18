@@ -14,14 +14,17 @@ export enum AttendanceStatus {
 
 export interface Employee {
   id: string; // Employee ID
-  name: string;
+  nameTh: string;
+  nameEn: string;
   department: string;
   position: string;
+  isActive: boolean;
 }
 
 export interface Course {
   code: string;
-  name: string;
+  nameTh: string;
+  nameEn: string;
   category: string;
   totalHours: number;
   validityMonths?: number;
@@ -33,8 +36,8 @@ export interface TrainingSession {
   startDate: string;
   endDate: string;
   location: string;
-  trainer?: string; // Added for audit compliance
-  organizer?: string; // Added for audit compliance
+  trainer?: string; 
+  organizer?: string; 
 }
 
 export interface Registration {

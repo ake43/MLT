@@ -8,12 +8,18 @@ export class ExcelService {
     const data = await this.readExcel(file);
     const errors: string[] = [];
     data.forEach((row: any, index: number) => {
-      const { ID, Name, Department, Position } = row;
-      if (!ID || !Name) {
-        errors.push(`Row ${index + 2}: Missing ID or Name`);
+      const { ID, Name_TH, Name_EN, Department, Position } = row;
+      if (!ID || (!Name_TH && !Name_EN)) {
+        errors.push(`Row ${index + 2}: Missing ID or Name (TH/EN)`);
         return;
       }
-      Database.addEmployee({ id: String(ID), name: Name, department: Department || 'N/A', position: Position || 'N/A' });
+      Database.addEmployee({ 
+        id: String(ID), 
+        nameTh: Name_TH || Name_EN || 'N/A', 
+        nameEn: Name_EN || Name_TH || 'N/A', 
+        department: Department || 'N/A', 
+        position: Position || 'N/A' 
+      });
     });
     return errors;
   }
@@ -22,14 +28,15 @@ export class ExcelService {
     const data = await this.readExcel(file);
     const errors: string[] = [];
     data.forEach((row: any, index: number) => {
-      const { Code, Name, Category, Hours, Validity } = row;
-      if (!Code || !Name || !Hours) {
-        errors.push(`Row ${index + 2}: Missing required fields`);
+      const { Code, Name_TH, Name_EN, Category, Hours, Validity } = row;
+      if (!Code || (!Name_TH && !Name_EN) || !Hours) {
+        errors.push(`Row ${index + 2}: Missing required fields (Code, Name, or Hours)`);
         return;
       }
       Database.addCourse({ 
         code: String(Code), 
-        name: Name, 
+        nameTh: Name_TH || Name_EN || 'N/A', 
+        nameEn: Name_EN || Name_TH || 'N/A', 
         category: Category || 'Technical', 
         totalHours: Number(Hours),
         validityMonths: Validity ? Number(Validity) : undefined
@@ -46,7 +53,7 @@ export class ExcelService {
     data.forEach((row: any, index: number) => {
       const { EmployeeID, CourseCode, Date, Hours } = row;
       if (!EmployeeID || !CourseCode || !Date || !Hours) {
-        errors.push(`Row ${index + 2}: Missing required fields`);
+        errors.push(`Row ${index + 2}: Missing required fields (EmployeeID, CourseCode, Date, Hours)`);
         return;
       }
 
@@ -54,16 +61,14 @@ export class ExcelService {
       const course = db.courses.find(c => c.code === String(CourseCode));
 
       if (!emp) {
-        errors.push(`Row ${index + 2}: Employee ${EmployeeID} not found`);
+        errors.push(`Row ${index + 2}: Employee ID ${EmployeeID} not found`);
         return;
       }
       if (!course) {
-        errors.push(`Row ${index + 2}: Course ${CourseCode} not found`);
+        errors.push(`Row ${index + 2}: Course Code ${CourseCode} not found`);
         return;
       }
 
-      // Logic: Create a historical session if it doesn't exist for that course/date
-      // For history import, we treat each entry as an attendance record for a virtual registration
       let session = db.sessions.find(s => s.courseCode === course.code && s.startDate === String(Date));
       if (!session) {
         session = {
@@ -118,11 +123,11 @@ export class ExcelService {
     let filename = '';
     
     if (type === 'employee') {
-      data = [{ ID: 'EMP001', Name: 'John Smith', Department: 'Engineering', Position: 'Developer' }];
-      filename = 'employee_template.xlsx';
+      data = [{ ID: 'EMP001', Name_TH: 'สมชาย รักดี', Name_EN: 'Somchai Rakdee', Department: 'Engineering', Position: 'Developer' }];
+      filename = 'employee_bilingual_template.xlsx';
     } else if (type === 'course') {
-      data = [{ Code: 'C001', Name: 'Safety Training', Category: 'Safety', Hours: 8, Validity: 12 }];
-      filename = 'course_template.xlsx';
+      data = [{ Code: 'C001', Name_TH: 'อบรมความปลอดภัย', Name_EN: 'Safety Training', Category: 'Safety', Hours: 8, Validity: 12 }];
+      filename = 'course_bilingual_template.xlsx';
     } else if (type === 'history') {
       data = [{ EmployeeID: 'EMP001', CourseCode: 'C001', Date: '2023-01-01', Hours: 4 }];
       filename = 'history_template.xlsx';

@@ -5,13 +5,13 @@ const STORAGE_KEY = 'mlt_training_db_v2';
 
 const INITIAL_DATA: AppState = {
   employees: [
-    { id: 'EMP001', name: 'John Doe', department: 'Engineering', position: 'Senior Dev' },
-    { id: 'EMP002', name: 'Jane Smith', department: 'Operations', position: 'Manager' },
+    { id: 'EMP001', nameTh: 'สมชาย รักดี', nameEn: 'Somchai Rakdee', department: 'Engineering', position: 'Senior Dev', isActive: true },
+    { id: 'EMP002', nameTh: 'สมหญิง จริงใจ', nameEn: 'Somying Jingjai', department: 'Operations', position: 'Manager', isActive: true },
   ],
   courses: [
-    { code: 'SEC101', name: 'Cybersecurity Awareness', category: 'Compliance', totalHours: 4, validityMonths: 12 },
-    { code: 'REACT202', name: 'Advanced React Patterns', category: 'Technical', totalHours: 16 },
-    { code: 'SAFE505', name: 'Fire & Emergency Safety', category: 'Safety', totalHours: 8, validityMonths: 24 },
+    { code: 'SEC101', nameTh: 'การตระหนักรู้ด้านความปลอดภัยไซเบอร์', nameEn: 'Cybersecurity Awareness', category: 'Compliance', totalHours: 4, validityMonths: 12 },
+    { code: 'REACT202', nameTh: 'รูปแบบการเขียน React ขั้นสูง', nameEn: 'Advanced React Patterns', category: 'Technical', totalHours: 16 },
+    { code: 'SAFE505', nameTh: 'ความปลอดภัยจากอัคคีภัยและเหตุฉุกเฉัน', nameEn: 'Fire & Emergency Safety', category: 'Safety', totalHours: 8, validityMonths: 24 },
   ],
   sessions: [
     { id: 'SESS001', courseCode: 'SEC101', startDate: '2024-05-01', endDate: '2024-05-01', location: 'Online', trainer: 'Alice Vance', organizer: 'IT Security Dept' },
@@ -25,12 +25,21 @@ export class Database {
 
   private static load(): AppState {
     const saved = localStorage.getItem(STORAGE_KEY);
-    return saved ? JSON.parse(saved) : INITIAL_DATA;
+    if (!saved) return INITIAL_DATA;
+    
+    const parsed = JSON.parse(saved);
+    // Migration: ensure isActive exists
+    if (parsed.employees) {
+      parsed.employees = parsed.employees.map((e: any) => ({
+        ...e,
+        isActive: e.isActive !== undefined ? e.isActive : true
+      }));
+    }
+    return parsed;
   }
 
   static save() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
-    // Trigger a global update event for React components
     window.dispatchEvent(new Event('db-updated'));
   }
 
@@ -38,12 +47,43 @@ export class Database {
     return this.state;
   }
 
-  static addEmployee(emp: Employee): boolean {
+  static addEmployee(emp: Partial<Employee> & { id: string }): boolean {
     const id = String(emp.id).trim();
-    if (this.state.employees.find(e => String(e.id).trim().toLowerCase() === id.toLowerCase())) return false;
-    this.state.employees.push({ ...emp, id });
+    const existingIndex = this.state.employees.findIndex(e => String(e.id).trim().toLowerCase() === id.toLowerCase());
+    
+    const employeeData: Employee = {
+      id,
+      nameTh: emp.nameTh || 'N/A',
+      nameEn: emp.nameEn || 'N/A',
+      department: emp.department || 'N/A',
+      position: emp.position || 'N/A',
+      isActive: emp.isActive !== undefined ? emp.isActive : true
+    };
+
+    if (existingIndex !== -1) {
+      this.state.employees[existingIndex] = employeeData;
+    } else {
+      this.state.employees.push(employeeData);
+    }
     this.save();
     return true;
+  }
+
+  static toggleEmployeeStatus(id: string) {
+    const emp = this.state.employees.find(e => e.id === id);
+    if (emp) {
+      emp.isActive = !emp.isActive;
+      this.save();
+    }
+  }
+
+  static deleteEmployee(id: string) {
+    this.state.employees = this.state.employees.filter(e => e.id !== id);
+    // Cleanup registrations and attendance associated with deleted employee
+    const regsToRemove = this.state.registrations.filter(r => r.employeeId === id).map(r => r.id);
+    this.state.registrations = this.state.registrations.filter(r => r.employeeId !== id);
+    this.state.attendance = this.state.attendance.filter(a => !regsToRemove.includes(a.registrationId));
+    this.save();
   }
 
   static addCourse(course: Course): boolean {
@@ -108,7 +148,6 @@ export class Database {
     const empId = String(data.employeeId).trim();
     const cCode = String(data.courseCode).trim();
 
-    // 1. Find or create a historical session
     let session = this.state.sessions.find(s => 
       String(s.courseCode).trim().toLowerCase() === cCode.toLowerCase() && 
       s.startDate === data.date && 
@@ -128,7 +167,6 @@ export class Database {
       this.state.sessions.push(session);
     }
 
-    // 2. Find or create registration
     let reg = this.state.registrations.find(r => 
       String(r.employeeId).trim().toLowerCase() === empId.toLowerCase() && 
       r.sessionId === session!.id
@@ -144,7 +182,6 @@ export class Database {
       this.state.registrations.push(reg);
     }
 
-    // 3. Record Attendance
     const att: AttendanceRecord = {
       id: `ATT_H_${Math.random().toString(36).substr(2, 6)}`,
       registrationId: reg.id,
@@ -153,7 +190,6 @@ export class Database {
     };
     this.state.attendance.push(att);
 
-    // 4. Update Status & Save
     this.updateRegistrationStatus(reg.id);
     this.save();
   }
